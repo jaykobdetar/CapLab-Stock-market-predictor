@@ -9,6 +9,6 @@ Not accurate in DLC scenarios
 ## Notes
 
 This works best when starting it from a fresh game.
-The accuracy of the player and 1 or 2 other stocks crashses after a while, but most of them remain stable. 
+The accuracy of the player stock and some others stop being reliable after a while, but most of them remain stable. 
 <img width="601" height="494" alt="image" src="https://github.com/user-attachments/assets/3c31051b-dd40-4857-8522-028477525658" />
 <img width="1908" height="573" alt="image" src="https://github.com/user-attachments/assets/143a75bc-938c-4085-b4dd-44018cf0c910" />
