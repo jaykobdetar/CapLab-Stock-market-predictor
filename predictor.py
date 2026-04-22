@@ -587,22 +587,73 @@ def _install_label_patches() -> None:
         )
         header = Text("\n".join(header_lines))
 
+        # New simplified layout: 5 columns.
+        #   Group | Price (now → next Δ) | Sentiment (now → next Δ)
+        #     | Match (last transition) | Hits (cumulative).
+        #
+        # Price and Sentiment cells each bundle "current value", "predicted
+        # next value", and the forward delta (next − now).  Arrows and
+        # deltas are coloured: green for positive, red for negative, dim
+        # grey for near-zero.  "Match" is green OK / red MISS / dim "—";
+        # row style stays unstyled so the cell colours read cleanly.
         table = Table(show_header=True, header_style="bold",
                       title="Live stock monitor", title_style="bold",
-                      expand=True)
-        table.add_column("group", justify="left", style="dim")
-        table.add_column("price", justify="right")
-        table.add_column("sent", justify="right")
-        table.add_column("pred+1 price", justify="right")
-        table.add_column("pred+1 sent", justify="right")
-        table.add_column("last Δprice", justify="right")
-        table.add_column("last Δsent", justify="right")
-        table.add_column("last match", justify="center")
-        table.add_column("hit-rate", justify="right")
+                      expand=True, pad_edge=False)
+        table.add_column("Group", justify="left", style="bold")
+        table.add_column("Price  (now  →  next  Δ)", justify="right")
+        table.add_column("Sentiment  (now  →  next  Δ)", justify="right")
+        table.add_column("Match", justify="center")
+        table.add_column("Hits", justify="right", style="dim")
 
         per_recno_diff = {}
         if last_transition is not None:
             per_recno_diff = {d.group_recno: d for d in last_transition.diffs}
+
+        def _delta_style(delta: float, eps: float) -> str:
+            if delta > eps:
+                return "green"
+            if delta < -eps:
+                return "red"
+            return "dim"
+
+        def _fmt_price_cell(now_val: float, pred) -> Text:
+            t = Text()
+            t.append(f"{now_val:7.4f}")
+            if pred is None:
+                t.append("  →  ", style="dim")
+                t.append(f"{'—':>7}", style="dim")
+                t.append(f"   {'—':>8}", style="dim")
+                return t
+            nxt = pred.base_stock_price
+            delta = nxt - now_val
+            style = _delta_style(delta, 1e-5)
+            t.append("  →  ", style="dim")
+            t.append(f"{nxt:7.4f}", style=style)
+            t.append(f"   {delta:+8.4f}", style=style)
+            return t
+
+        def _fmt_sent_cell(now_val: float, pred) -> Text:
+            t = Text()
+            t.append(f"{now_val:+7.2f}")
+            if pred is None:
+                t.append("  →  ", style="dim")
+                t.append(f"{'—':>7}", style="dim")
+                t.append(f"   {'—':>7}", style="dim")
+                return t
+            nxt = pred.sentiment
+            delta = nxt - now_val
+            style = _delta_style(delta, 1e-3)
+            t.append("  →  ", style="dim")
+            t.append(f"{nxt:+7.2f}", style=style)
+            t.append(f"   {delta:+7.2f}", style=style)
+            return t
+
+        def _fmt_match_cell(td) -> Text:
+            if td is None:
+                return Text("—", style="dim")
+            if td.matches:
+                return Text("OK", style="bold green")
+            return Text("MISS", style="bold red")
 
         if last is not None:
             forecast_by_recno = {p.group_recno: p for p in last.forecast.per_stock}
@@ -613,34 +664,18 @@ def _install_label_patches() -> None:
                 if s is None:
                     continue
                 pred = forecast_by_recno.get(recno)
-                pred_price_s = f"{pred.base_stock_price:.4f}" if pred else "—"
-                pred_sent_s = f"{pred.sentiment:+.2f}" if pred else "—"
                 td = per_recno_diff.get(recno)
-                if td is None:
-                    dp_s, ds_s, m_s = "—", "—", "—"
-                else:
-                    dp_s = f"{td.predicted_price - td.observed_price:+.4f}"
-                    ds_s = f"{td.predicted_sentiment - td.observed_sentiment:+.2f}"
-                    m_s = "OK" if td.matches else "MISS"
                 pg = stats.per_group.get(recno)
                 if pg and pg[1]:
                     hr_s = f"{pg[0]}/{pg[1]}"
                 else:
                     hr_s = "—"
-                row_style = None
-                if td is not None and not td.matches:
-                    row_style = "yellow"
                 table.add_row(
                     label_for(recno),
-                    f"{s.base_stock_price:.4f}",
-                    f"{s.sentiment:+.2f}",
-                    pred_price_s,
-                    pred_sent_s,
-                    dp_s,
-                    ds_s,
-                    m_s,
+                    _fmt_price_cell(s.base_stock_price, pred),
+                    _fmt_sent_cell(s.sentiment, pred),
+                    _fmt_match_cell(td),
                     hr_s,
-                    style=row_style,
                 )
 
         assert self._live is not None
@@ -703,33 +738,50 @@ def _install_label_patches() -> None:
         )
         label_w = max(label_w, 6)
 
+        # New simplified layout — group | price (now → next Δ)
+        # | sentiment (now → next Δ) | match.  Each bundle reads left to
+        # right: current value, an arrow, the predicted next value, then
+        # the forward delta (next − now).  The subheader below uses the
+        # exact same field widths as the data rows so columns line up.
+        price_hdr = f"{'now':>7}  →  {'next':>7}   {'Δ':>8}"
+        sent_hdr = f"{'now':>7}  →  {'next':>7}   {'Δ':>7}"
+        price_block_w = len(price_hdr)
+        sent_block_w = len(sent_hdr)
+
         print(
-            f"\n{'group':<{label_w}} {'price':>10} {'sent':>8} "
-            f"{'pred+1 price':>14} {'pred+1 sent':>12} "
-            f"{'Δprice':>9} {'Δsent':>8} match"
+            f"\n{'group':<{label_w}}  "
+            f"{'price':^{price_block_w}}  "
+            f"{'sentiment':^{sent_block_w}}  match"
         )
-        print("-" * (label_w + 66))
+        print(
+            f"{'':<{label_w}}  "
+            f"{price_hdr}  "
+            f"{sent_hdr}"
+        )
+        print("-" * (label_w + price_block_w + sent_block_w + 12))
         for recno in last.listed_recnos:
             s = next((x for x in last.inputs if x.group_recno == recno), None)
             if s is None:
                 continue
             pred = forecast_by_recno.get(recno)
-            pp = f"{pred.base_stock_price:10.4f}" if pred else f"{'—':>10}"
-            ps = f"{pred.sentiment:+8.2f}" if pred else f"{'—':>8}"
-            td = per_recno_diff.get(recno)
-            if td is None:
-                dp = f"{'—':>9}"
-                ds = f"{'—':>8}"
-                m = "—"
+            if pred is None:
+                p_next_s = f"{'—':>7}"
+                p_delta_s = f"{'—':>8}"
+                s_next_s = f"{'—':>7}"
+                s_delta_s = f"{'—':>7}"
             else:
-                dp = f"{td.predicted_price - td.observed_price:+9.4f}"
-                ds = f"{td.predicted_sentiment - td.observed_sentiment:+8.2f}"
-                m = "OK" if td.matches else "MISS"
+                p_next_s = f"{pred.base_stock_price:7.4f}"
+                p_delta_s = f"{pred.base_stock_price - s.base_stock_price:+8.4f}"
+                s_next_s = f"{pred.sentiment:+7.2f}"
+                s_delta_s = f"{pred.sentiment - s.sentiment:+7.2f}"
+            td = per_recno_diff.get(recno)
+            m = "—" if td is None else ("OK" if td.matches else "MISS")
             lbl = label_for(recno)
             print(
-                f"{lbl:<{label_w}} {s.base_stock_price:10.4f} "
-                f"{s.sentiment:+8.2f} "
-                f"{pp} {ps} {dp} {ds} {m}"
+                f"{lbl:<{label_w}}  "
+                f"{s.base_stock_price:7.4f}  →  {p_next_s}   {p_delta_s}  "
+                f"{s.sentiment:+7.2f}  →  {s_next_s}   {s_delta_s}  "
+                f"{m}"
             )
 
     lm.Renderer._render_tui = _render_tui_named
