@@ -4,8 +4,7 @@ Attempts to predict the stock market 1 day in advance on capitalism lab V11.1.02
 ## Accuracy
 
 ~90–95% accuracy on default settings (base game / custom scenarios)
-Less reliable in DLC scenarios
-Accuracy may vary depending on game state and progression
+Not accurate in DLC scenarios
 
 ## Notes
 
